@@ -1,6 +1,9 @@
 import requests, argparse, pycountry, json, os, time, csv
+##    .\venv\Scripts\Activate.ps1
+## pip install pycountry 
 
 SCHEMA = ['name', 'age', 'count', 'country_id', 'source']
+FIELD_PATH = "data/fields.json"
 
 def build_parser(): 
     p = argparse.ArgumentParser(description="CLI for agify parameters") 
@@ -39,15 +42,42 @@ def get_data(args):
         _print_data(data, args)
         return r, data
 
+
+def _load_field_map(path=FIELD_PATH):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    if not os.path.exists(path):
+        with open(path, "w") as f:
+            json.dump({
+                "name": "name",
+                "age": "age",
+                "count": "count",
+                "country_id": "country_id"
+            }, f, indent=4)
+    with open(path, "r") as f: 
+        return json.load(f)
+
+
+def _normalize_record(raw: dict, response, args, field_map:dict):
+    out = {}
+    for target_key, source_key in field_map.items():
+        out[target_key] = raw.get(source_key)
+    out["name"] = out.get("name") or args.name
+    out["country_id"] = (out.get("country_id") or args.country_id or "").upper()
+    out["source"] = "cache" if response is None else "live"
+    return {k: out.get(k) for k in SCHEMA}
+
+
 def _build_csv_dict(data, response, args):
-    csv_dict = {
+    """csv_dict = {
         'name': data.get('name') or args.name, 
         'age': data.get('age'),
         'count': data.get('count'), 
         'country_id': (args.country_id or "").upper(),
         'source': 'cache' if response is None else 'live'
-    }
-    return csv_dict
+    }"""
+
+    field_map = _load_field_map()
+    return _normalize_record(data, response, args, field_map)
 
 def _csv_header_ok(path, schema):
     if not os.path.exists(path):
@@ -99,7 +129,7 @@ if __name__ == "__main__":
             is_new = not os.path.exists(file_path)
             mode = 'w' if is_new else 'a'
             if not _csv_header_ok(file_path, SCHEMA):
-                rewrite = input("Warning: header mismatch. Recreate CSV file? Y/N: ")
+                rewrite = input("Warning: header mismatch. Recreate CSV file? Y/N: ").lower()
                 if rewrite in ('y', 'yes'):
                     is_new = True
                     mode = 'w'
