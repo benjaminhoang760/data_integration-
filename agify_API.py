@@ -82,7 +82,6 @@ def _read_cache():
         raise SystemExit(1)
 
 #---------------------------------------tests-------------------------------------------#
-
 def country_test(data):
   print()
 
