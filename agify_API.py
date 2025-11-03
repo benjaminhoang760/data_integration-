@@ -1,6 +1,4 @@
 import requests, argparse, pycountry, json, os, time, csv
-##    .\venv\Scripts\Activate.ps1
-## pip install pycountry 
 
 SCHEMA = ['name', 'age', 'count', 'country_id', 'source']
 FIELD_PATH = "data/fields.json"
@@ -13,9 +11,9 @@ def build_parser():
     q.add_argument("name")
     q.add_argument("--country_id", help="choose a country code")
     q.add_argument("--save_json", action="store_true", help="save JSON")
-    q.add_argument("--info", action="store_true", help="info for request")
     q.add_argument("--to_csv", action="store_true", help="Build CSV row")
-
+    q.add_argument("--info", action="store_true", help="info for request")
+    
     c = sp.add_parser("countries", help="list ISO country codes")
     return p
 
@@ -32,7 +30,9 @@ def get_data(args):
             r = requests.get(url, headers=hds, params=prms, timeout=5)
             r.raise_for_status()
             break 
-        except requests.RequestException: 
+        except requests.RequestException as e: 
+            if attempt == 2: 
+                print(f"Network attempts failed:\n{e}")
             time.sleep(0.5 * (attempt +1))
     if r is None: 
         data = _read_cache()
@@ -66,16 +66,8 @@ def _normalize_record(raw: dict, response, args, field_map:dict):
     out["source"] = "cache" if response is None else "live"
     return {k: out.get(k) for k in SCHEMA}
 
-
+##could consolidate this 
 def _build_csv_dict(data, response, args):
-    """csv_dict = {
-        'name': data.get('name') or args.name, 
-        'age': data.get('age'),
-        'count': data.get('count'), 
-        'country_id': (args.country_id or "").upper(),
-        'source': 'cache' if response is None else 'live'
-    }"""
-
     field_map = _load_field_map()
     return _normalize_record(data, response, args, field_map)
 
@@ -122,6 +114,7 @@ if __name__ == "__main__":
     
     if args.cmd in ("query", "q"):
         r, data = get_data(args)
+        ##extract this function 
         if args.to_csv and data['age'] is not None:
             file_path = "data/out.csv"
             csv_dict = _build_csv_dict(data, r, args)
@@ -146,13 +139,6 @@ if __name__ == "__main__":
             except (OSError, IOError) as e: 
                 print(f"CSV writer error: {e}")
 
-        if args.info:
-         if r is not None:
-            print("Full URL:", r.url)
-            print("Status code:", r.status_code)    
-         else: 
-            print("Info: using cache (offline)")
-            
         if args.save_json and data['age'] is not None:
             file_path = "data/raw.json"
             os.makedirs(os.path.dirname(file_path), exist_ok=True)
@@ -161,7 +147,14 @@ if __name__ == "__main__":
                     json.dump(data, json_file, indent=4)
                 print(f"data successfully written to {file_path}")   
             except IOError as e: 
-                print(f"Error wrtiing file to {file_path}: {e}")
+                print(f"Error writing file to {file_path}: {e}")
+                
+        if args.info:
+            if r is not None:
+                print("Full URL:", r.url)
+                print("Status code:", r.status_code)    
+            else: 
+                print("Info: using cache (offline)")
 
     if args.cmd == "countries":
         for country in pycountry.countries:
