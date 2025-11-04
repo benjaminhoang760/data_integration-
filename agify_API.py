@@ -1,7 +1,10 @@
-import requests, argparse, pycountry, json, os, time, csv
+import requests, argparse, pycountry, json, os, time, csv, sqlite3
 
 SCHEMA = ['name', 'age', 'count', 'country_id', 'source']
 FIELD_PATH = "data/fields.json"
+CSV_PATH = "data/out.csv"
+DB_PATH = "data/pipeline.db"
+TABLE_NAME = "agify_queries"
 
 def build_parser(): 
     p = argparse.ArgumentParser(description="CLI for agify parameters") 
@@ -10,12 +13,47 @@ def build_parser():
     q = sp.add_parser("query", aliases=["q"], help="query a name")
     q.add_argument("name")
     q.add_argument("--country_id", help="choose a country code")
-    q.add_argument("--save_json", action="store_true", help="save JSON")
-    q.add_argument("--to_csv", action="store_true", help="Build CSV row")
+    q.add_argument("--json_cache", action="store_true", help="save JSON")
+    q.add_argument("--csv_save", action="store_true", help="Build CSV row")
     q.add_argument("--info", action="store_true", help="info for request")
     
+    db = sp.add_parser("db", help="database ops")
+    db_sp = db.add_subparsers(dest="db_cmd", required=True)
+    db_sp.add_parser("init", help="create SQLlite db and table")
+
     c = sp.add_parser("countries", help="list ISO country codes")
     return p
+
+def _get_db(db_path = DB_PATH):
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def db_initialize(db_path = DB_PATH):
+    with _get_db(db_path) as conn:
+        conn.execute(f"""
+                      CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
+                      id INTEGER PRIMARY KEY AUTOINCREMENT,
+                      name TEXT NOT NULL, 
+                      age INTEGER, 
+                      count INTEGER, 
+                      country_id TEXT, 
+                      source TEXT NOT NULL CHECK (source IN ('live', 'cache')),
+                      fetched_at TEXT NOT NULL DEFAULT (datetime('now'))
+                        );
+                    """)
+        conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{TABLE_NAME}_fetched_at ON {TABLE_NAME}(fetched_at);")
+        conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{TABLE_NAME}_country ON {TABLE_NAME}(country_id);")
+
+def db_insert_row(row: dict, db_path = DB_PATH):
+    with _get_db(db_path) as conn:
+        cur = conn.execute(
+            f"""INSERT INTO {TABLE_NAME} (name, age, count, country_id, source)
+            VALUES (?, ?, ?, ?, ?)""",
+            (row['name'], row['age'], row['count'], row['country_id'], row['source'])
+        )
+        return cur.lastrowid
+
 
 def get_data(args):
     r = None
@@ -79,6 +117,31 @@ def _csv_header_ok(path, schema):
         first_line = next(csv_reader, None)
     return first_line == schema 
 
+def write_csv(csv_path, data, response, args):
+    csv_dict = _build_csv_dict(data, response, args)
+    os.makedirs(os.path.dirname(csv_path), exist_ok=True)
+    is_new = not os.path.exists(csv_path)
+    mode = 'w' if is_new else 'a'
+    if not _csv_header_ok(csv_path, SCHEMA):
+        rewrite = input("Warning: header mismatch. Recreate CSV file? y/n: ").lower()
+        if rewrite in ('y', 'yes'):
+            is_new = True
+            mode = 'w'
+        else:
+            print('Command aborted')
+            raise SystemExit(0)
+    try: 
+        with open(csv_path, mode, newline='') as csv_file:
+            writer = csv.DictWriter(csv_file, fieldnames=SCHEMA)
+            if is_new: 
+                writer.writeheader()
+            writer.writerow(csv_dict)
+            rowid = db_insert_row(csv_dict)
+        print(f"Successfully saved CSV file to {csv_path}")
+        print(f"Inserted row id {rowid} into {TABLE_NAME}")
+    except (OSError, IOError) as e:
+        print(f"CSV writer error: {e}")
+
 def _print_data(data, args): 
     output = f"The average age for {args.name.capitalize()} is {data['age']}"
     sample_size = f"\nSample size: {data['count']}"
@@ -111,35 +174,14 @@ def country_test(data):
 
 if __name__ == "__main__":
     args = build_parser().parse_args()
-    
+ 
     if args.cmd in ("query", "q"):
         r, data = get_data(args)
-        ##extract this function 
-        if args.to_csv and data['age'] is not None:
-            file_path = "data/out.csv"
-            csv_dict = _build_csv_dict(data, r, args)
-            os.makedirs(os.path.dirname(file_path), exist_ok=True)
-            is_new = not os.path.exists(file_path)
-            mode = 'w' if is_new else 'a'
-            if not _csv_header_ok(file_path, SCHEMA):
-                rewrite = input("Warning: header mismatch. Recreate CSV file? Y/N: ").lower()
-                if rewrite in ('y', 'yes'):
-                    is_new = True
-                    mode = 'w'
-                else: 
-                    print("Aborted.")
-                    raise SystemExit(0)
-            try: 
-                with open(file_path, mode, newline='') as csv_file:
-                    writer = csv.DictWriter(csv_file, fieldnames=SCHEMA)
-                    if is_new:
-                        writer.writeheader()
-                    writer.writerow(csv_dict)
-                print(f"Successfully saved CSV file to {file_path}")
-            except (OSError, IOError) as e: 
-                print(f"CSV writer error: {e}")
 
-        if args.save_json and data['age'] is not None:
+        if args.csv_save and data['age'] is not None:
+            write_csv(CSV_PATH, data, r, args)
+
+        if args.json_cache and data['age'] is not None:
             file_path = "data/raw.json"
             os.makedirs(os.path.dirname(file_path), exist_ok=True)
             try: 
@@ -156,9 +198,14 @@ if __name__ == "__main__":
             else: 
                 print("Info: using cache (offline)")
 
+    if args.cmd == "db":
+        if args.db_cmd == "init":
+            db_initialize()
+            if os.path.exists(DB_PATH):
+                print("DB already initalized")
+            if not os.path.exists(DB_PATH):
+                print(f"DB initialized at {DB_PATH} with table '{TABLE_NAME}'.")
+
     if args.cmd == "countries":
         for country in pycountry.countries:
             print(f"{country.name}: {country.alpha_2}")
-
-
-
