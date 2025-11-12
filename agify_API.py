@@ -18,8 +18,8 @@ def build_parser():
     q.add_argument("--info", action="store_true", help="info for request")
     
     db = sp.add_parser("db", help="database ops")
-    db_sp = db.add_subparsers(dest="db_cmd", required=True)
-    db_sp.add_parser("init", help="create SQLlite db and table")
+    db.add_argument("--init", action="store_true", help="create SQLlite db and table")
+    db.add_argument("--latest", type=int, metavar="N", help='show N most recent rows')
 
     c = sp.add_parser("countries", help="list ISO country codes")
     return p
@@ -54,7 +54,14 @@ def db_insert_row(row: dict, db_path = DB_PATH):
         )
         return cur.lastrowid
 
-
+def db_query_latest(n: int):
+    with _get_db() as conn: 
+        return conn.execute(
+            f"""SELECT * FROM {TABLE_NAME}
+            ORDER BY datetime(fetched_at) DESC
+            LIMIT ?""", (n,)
+        ).fetchall()
+    
 def get_data(args):
     r = None
     url = "https://api.agify.io/"
@@ -71,6 +78,8 @@ def get_data(args):
         except requests.RequestException as e: 
             if attempt == 2: 
                 print(f"Network attempts failed:\n{e}")
+                break
+            print(f"Attempt {attempt+1} failed. Retrying...")
             time.sleep(0.5 * (attempt +1))
     if r is None: 
         data = _read_cache()
@@ -199,12 +208,16 @@ if __name__ == "__main__":
                 print("Info: using cache (offline)")
 
     if args.cmd == "db":
-        if args.db_cmd == "init":
-            db_initialize()
+        if args.init:
             if os.path.exists(DB_PATH):
                 print("DB already initalized")
-            if not os.path.exists(DB_PATH):
+            elif not os.path.exists(DB_PATH):
+                db_initialize()
                 print(f"DB initialized at {DB_PATH} with table '{TABLE_NAME}'.")
+        elif args.latest:
+            if getattr(args, "latest", None):
+                for r in db_query_latest(args.latest): 
+                    print(dict(r))
 
     if args.cmd == "countries":
         for country in pycountry.countries:
