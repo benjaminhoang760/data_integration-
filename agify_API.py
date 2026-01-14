@@ -20,6 +20,9 @@ def build_parser():
     db = sp.add_parser("db", help="database ops")
     db_sp = db.add_subparsers(dest="db_cmd", required=True)
     db_sp.add_parser("init", help="create SQLlite db and table")
+    sql = db_sp.add_parser("latest", help="SQL query latest entries")
+    sql.add_argument("--limit", type=int, default=5, help="number of entries")
+    db_sp.add_parser("last7", help="last 7 days entries")
 
     c = sp.add_parser("countries", help="list ISO country codes")
     return p
@@ -54,6 +57,25 @@ def db_insert_row(row: dict, db_path = DB_PATH):
         )
         return cur.lastrowid
 
+def db_latest(limit: int, db_path = DB_PATH):
+    limit = max(1, int(limit))
+    with _get_db(db_path) as conn:
+        rows = conn.execute(
+            f"""SELECT * FROM {TABLE_NAME}
+            ORDER BY fetched_at DESC
+            LIMIT ?""",
+            (limit,),
+        ).fetchall()
+    return rows 
+
+def db_last7(db_path = DB_PATH):
+    with _get_db(db_path) as conn:
+        rows = conn.execute(
+            f"""SELECT * FROM {TABLE_NAME}
+            WHERE fetched_at >= datetime('now', '-7 days')
+            ORDER BY fetched_at DESC"""
+        ).fetchall()
+    return rows
 
 def get_data(args):
     r = None
@@ -80,7 +102,6 @@ def get_data(args):
         _print_data(data, args)
         return r, data
 
-
 def _load_field_map(path=FIELD_PATH):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     if not os.path.exists(path):
@@ -93,7 +114,6 @@ def _load_field_map(path=FIELD_PATH):
             }, f, indent=4)
     with open(path, "r") as f: 
         return json.load(f)
-
 
 def _normalize_record(raw: dict, response, args, field_map:dict):
     out = {}
@@ -200,11 +220,15 @@ if __name__ == "__main__":
 
     if args.cmd == "db":
         if args.db_cmd == "init":
+            already = os.path.exists(DB_PATH)
             db_initialize()
-            if os.path.exists(DB_PATH):
-                print("DB already initalized")
-            if not os.path.exists(DB_PATH):
-                print(f"DB initialized at {DB_PATH} with table '{TABLE_NAME}'.")
+            print("DB already initalized" if already else f"DB initialized at {DB_PATH} with table '{TABLE_NAME}'")
+        elif args.db_cmd == "latest": 
+            for row in db_latest(args.limit):
+                print(dict(row))
+        elif args.db_cmd == "last7":
+            for row in db_last7():
+                print(dict(row))
 
     if args.cmd == "countries":
         for country in pycountry.countries:
