@@ -79,7 +79,7 @@ def db_last7(db_path = DB_PATH):
 
 def get_data(args):
     r = None
-    url = "https://api.agify.io/"
+    url = "https://api.agify.io"
     hds = {"Accept": "application/json", "User-Agent": "bh-learning/0.1"}
     prms = {'name': args.name}
 

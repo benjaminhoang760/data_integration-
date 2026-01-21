@@ -1,14 +1,16 @@
 # Agify Pipeline
 ## Quickstart
 ```bash 
-python -m venv .venv
+### How do I make a good README with and directions notes like this? 
+### Navigate or create desired directory
+    python -m venv .venv
 # Windows powershell
 ## Initializing v environment
-    .\venv\Scripts\Activate.ps1 
+    source .venv/bin/activate
 ## Install libraries
     pip install pycountry, requests
 ## Sample query with all fields
-    py agify_API.py q ben --country_id US --save_json --to_csv --info
+    python agify_API.py q ben --country_id US --save_json --to_csv --info
 ```
 ## Sample output
     The average age for Ben is 50 in United States 
