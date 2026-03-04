@@ -10,7 +10,11 @@
 ## Install libraries
     pip install pycountry, requests
 ## Sample query with all fields
-    python agify_API.py q ben --country_id US --save_json --to_csv --info
+    python agify_API.py q ben --country_id US --json_cache --csv_save --info
+## Sample database query
+    python agify_API.py db init #to initialize db
+    python agify_API.py db latest --limit 3 #SQL query for latest 3 entries
+
 ```
 ## Sample output
     The average age for Ben is 50 in United States 
